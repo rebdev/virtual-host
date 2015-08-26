@@ -2,7 +2,7 @@
 #
 # Script to add the correct vhost files to make a website available.
 # Should be run after new-site script is used to create the site folder structure and permissions.
-# https://github.com/RoverWire/virtualhost/blob/master/virtualhost.sh
+# With a little help from https://github.com/RoverWire/virtualhost/blob/master/virtualhost.sh
 # Date: 27/7/2015
 # Author: Rebecca
 # 
