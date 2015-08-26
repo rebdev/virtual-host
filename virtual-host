@@ -1,0 +1,189 @@
+#!/bin/bash
+#
+# Script to add the correct vhost files to make a website available.
+# Should be run after new-site script is used to create the site folder structure and permissions.
+# https://github.com/RoverWire/virtualhost/blob/master/virtualhost.sh
+# Date: 27/7/2015
+# Author: Rebecca
+# 
+
+### Set default parameters
+action=$1
+subdomain=$2
+cmstype=$3
+owner=$(who am i | awk '{print $1}')
+email='webmaster@localhost'
+sitesEnable='/etc/apache2/sites-enabled/'
+sitesEnablesubdomain=$sitesEnable$subdomain.conf
+sitesAvailable='/etc/apache2/sites-available/'
+sitesAvailablesubdomain=$sitesAvailable$subdomain.conf
+
+
+
+
+### Can only run this script as root
+
+if [ "$(whoami)" != 'root' ]; then
+	echo $"You have no permission to run $0 as non-root user. Use sudo"
+		exit 1;
+fi
+
+
+
+
+### Check input:
+
+# Action must be either create or delete.
+if [[ ("$action" != 'create') && ("$action" != 'delete') ]]; then
+	echo $"You need to specify either create or delete as the first command param. eg bash virtual-host create mycoolsite joomla"
+		exit 1;
+fi
+
+# We need a subdomain, obviously.
+while [ "$subdomain" == "" ]
+do
+	echo -e $"Please specify a subdomain and a CMS type. e.g. bash virtual-host mycoolsite joomla"
+		exit 1;
+done
+
+
+### Create or delete site depending on action specified.
+
+
+if [ "$action" == 'create' ] 
+then
+
+	### Check to make sure a CMS type has been specified so we can pick which of the templates to set up
+	while [ "$cmstype" == "" ]
+	do
+		echo -e $"Please specify a CMS type. e.g. bash virtual-host create mycoolsite joomla"
+			exit 1;
+	done
+
+
+	### Check if the directory exists. If it doesn't exist then we'll create it.
+	if [ ! -d "/sites/$subdomain" ]; then
+		echo "Creating directory..."
+		sudo bash new-site $subdomain
+	fi
+
+
+	### Check if rules file already exists; if it doesn't, create one. If it does, let user decide if they want to create it.
+	if [ -e $sitesAvailablesubdomain ]; then
+
+		if ! [ -e $sitesEnablesubdomain ]; then
+			echo -e "Virtual host rules file already exists. Do you want to enable it? n will exit. (y/n)"
+			read addlnk
+			if [ "$addlnk" == 'y' -o "$addlnk" == 'Y' ]; then
+				# create the link				
+				echo "Creating link from $sitesEnablesubdomain to enable it..."
+				sudo ln -s $sitesAvailablesubdomain $sitesEnablesubdomain
+			else
+				echo -e $"Existing rules file not enabled. Try another subdomain, or delete the existing rules file if you want to use this one."
+				exit;
+			fi
+		else
+			# Both sites-available and sites-enabled conf files exist so this site is already set up.
+			echo -e $"This subdomain already exists.\nPlease try another one."
+			exit;
+		fi
+
+	else
+		echo -e "\nCreating the new virtual host for $subdomain.dev.internet-thinking.com.au..."
+
+		# Use the cmstype param supplied to select and copy a template to subdomain.conf.
+		cmstype=${cmstype^^}
+		template=000-FASTCGI-TEMPLATE-$cmstype
+
+		sudo cp '/etc/apache2/sites-available/'$template $sitesAvailablesubdomain
+		if [ $? -eq 0 ]; then
+			echo -e "Virtual host rules file created."
+		else
+			echo -e "Failed to copy virtual host template file."
+			exit;
+		fi
+
+		### Change the subdomain placeholders in the template copy to reflect the requested subdomain name
+		sudo sed -i 's/%SUBDOMAIN%/'$subdomain'/g' $sitesAvailablesubdomain
+		if [ $? -eq 0 ]; then
+			echo -e "Placeholders filled in."
+		else
+			echo -e "Failed to change placeholders in virtual host template file."
+			exit;
+		fi
+
+		### Add the sites-enabled file
+		echo "Adding a link to the virtual host rules file in sites-enabled..."
+		sudo ln -s $sitesAvailablesubdomain $sitesEnablesubdomain
+		if [ $? -eq 0 ]; then
+			echo -e "Site enabled."
+		else
+			echo -e "Failed to create link at $sitesEnablesubdomain. Please check this manually then run this command again."
+			exit;
+		fi
+
+		### Restart the server
+		echo "Restarting the server so all these changes can take effect..."
+		sudo service apache2 reload
+
+		echo -e "\nDone. Don't forget to add '192.168.11.3 http://$subdomain.dev.internet-thinking.com.au' to your hosts file."
+		exit 0
+	fi
+
+elif [ "$action" == 'delete' ] 
+then
+
+	### Check whether domain already exists and delete if it does.
+	if ! [ -e $sitesEnablesubdomain ]; then
+		echo -e $"Site was already disabled."
+	else
+		### Disable site
+		echo -e "Disabling site..."		
+		rm $sitesEnablesubdomain
+		if [ $? -eq 0 ]; then
+			echo -e "Site disabled."
+			### Restart Apache
+			echo -e "Restarting the server so changes take effect..."		
+			sudo service apache2 reload
+		else
+			echo -e "Failed to remove file at $sitesEnablesubdomain. Please remove manually then run this command again."
+			exit 0
+		fi
+	fi
+
+	### Check if rules file exists and delete it if it does.
+	if ! [ -e $sitesAvailablesubdomain ]; then
+		echo -e "Virtual host rules file has already been removed."
+	else
+		### Delete virtual host rules files
+		echo -e "Deleting virtual host rules files..."			
+		rm $sitesAvailablesubdomain
+		if [ $? -eq 0 ]; then
+			echo -e "Virtual host rules file deleted."
+		else
+			echo -e "Failed to remove virtual host rules file at $sitesAvailablesubdomain. Please remove manually then run this command again."
+			exit 0
+		fi
+	fi
+
+	### If we got to here without exiting, show a success message
+	echo -e $"Virtual host $subdomain is no longer available. Now for the site files and directory."
+
+	### Check if directory exists or not and request deletion directions if it does.
+	if [ -d "/sites/$subdomain" ]; then
+		echo -e $"Delete this subdomain's directory from the server? (y/n)"
+		read deldir
+		if [ "$deldir" == 'y' -o "$deldir" == 'Y' ]; then
+			### Delete the directory
+			rm -rf "/sites/$subdomain"
+			echo -e $"Directory deleted."
+		else
+			echo -e $"Directory conserved."
+		fi
+	else
+		echo -e $"Directory for this subdomain had already been removed."
+	fi
+
+	echo -e $"All done. Hooray!"
+
+fi
